@@ -42,8 +42,16 @@
                                                 (if rkey
                                                   (update-in data rkey up-fn)
                                                   (up-fn data))])))))
+
+                          [old-meta old-value :as old-state] (if rkey
+                                                               (let [[old-meta old-val] (get @state fkey)]
+                                                                 [old-meta (get old-val rkey)])
+                                                               (get @state fkey))
+                          _(println \newline @state)
                           new-state (update-atom state)]
-                      [(second (get new-state fkey))
+                      (println "key-vec" key-vec)
+                      (println "fkey" fkey "rkey" rkey "old-state" old-state)
+                      [old-value
                        (second (get new-state fkey))])))))
   (-assoc-in [this key-vec meta val opts] (-update-in this key-vec meta (fn [_] val) opts))
   (-dissoc [_ key opts]

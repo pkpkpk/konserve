@@ -268,8 +268,8 @@
 
 (defn read-web-stream
   "Accepts the bget locked callback arg and returns a promise-chan containing
-   a concatenated byte array with the first offset bytes dropped:
-   (k/bget store :key (read-web-stream m))"
+   a concatenated byte array with the first offset bytes dropped
+   `(k/bget store :key read-web-stream)`"
   [{:keys [input-stream offset]}]
   (let [reader (.getReader input-stream)
         chunks #js[]]
@@ -341,4 +341,5 @@
                                                   :lock-blob? true}}
                             (dissoc params :config))
         backing            (IndexedDBackingStore. db-name nil)]
+    (println store-config)
     (defaults/connect-default-store backing store-config)))

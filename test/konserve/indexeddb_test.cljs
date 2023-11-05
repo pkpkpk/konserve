@@ -6,7 +6,8 @@
             [konserve.indexeddb :as idb]
             [konserve.protocols :as p]
             [konserve.tests.cache :as ct]
-            [konserve.tests.gc :as gct])
+            [konserve.tests.gc :as gct]
+            [konserve.tests.serializers :as st])
   (:import [goog userAgent]))
 
 (deftest ^:browser lifecycle-test
@@ -114,10 +115,8 @@
   (async done
          (go
           (<! (idb/delete-idb "cache-store"))
-          (let [store (<! (idb/connect-idb-store "cache-store"))
-                f (fn [{:keys [input-stream offset] :as locked}]
-                    (idb/read-web-stream locked))]
-            (<! (ct/test-cached-PBin-async store f))
+          (let [store (<! (idb/connect-idb-store "cache-store"))]
+            (<! (ct/test-cached-PBin-async store idb/read-web-stream))
             (done)))))
 
 #!============
@@ -130,3 +129,14 @@
           (let [store (<! (idb/connect-idb-store "gc-store"))]
             (<! (gct/test-gc-async store))
             (done)))))
+
+#!==================
+#! Serializers tests
+
+(deftest fressian-serializer-test
+  (async done
+    (go
+     (<! (st/test-fressian-serializers-async "/tmp/serializers-test"
+                                             idb/connect-idb-store
+                                             idb/delete-idb))
+     (done))))

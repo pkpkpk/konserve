@@ -150,7 +150,7 @@
 
 (defn assoc
   "Associates the key-vec to the value, any missing collections for
- the key-vec (nested maps and vectors) are newly created."
+   the key-vec (nested maps and vectors) are newly created."
   ([store key val]
    (assoc store key val {:sync? false}))
   ([store key val opts]
@@ -171,7 +171,7 @@
 
 (defn append
   "Append the Element to the log at the given key or create a new append log there.
-  This operation only needs to write the element and pointer to disk and hence is useful in write-heavy situations."
+   This operation only needs to write the element and pointer to disk and hence is useful in write-heavy situations."
   ([store key elem]
    (append store key elem {:sync? false}))
   ([store key elem opts]

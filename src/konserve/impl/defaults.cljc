@@ -53,60 +53,58 @@
   [backing store-key serializer write-handlers
    {:keys [key-vec compressor encryptor up-fn up-fn-meta
            config operation input sync? version] :as env} [old-meta old-value]]
-  (async+sync
-   sync? *default-sync-translation*
-   (go-try-
-    (let [[key & rkey] key-vec
-          store-key (or store-key (key->store-key key))
-          to-array #?(:cljs
-                      (fn [value]
-                        (-serialize ((encryptor  (:encryptor config)) (compressor serializer)) nil write-handlers value))
-                      :clj
-                      (fn [value]
-                        (let [bos (ByteArrayOutputStream.)]
-                          (try (-serialize ((encryptor (:encryptor config)) (compressor serializer))
-                                           bos write-handlers value)
-                               (.toByteArray bos)
-                               (finally
-                                 (.close bos))))))
+  (let [to-array #?(:cljs
+                    (fn [value]
+                      (-serialize ((encryptor  (:encryptor config)) (compressor serializer)) nil write-handlers value))
+                    :clj
+                    (fn [value]
+                      (let [bos (ByteArrayOutputStream.)]
+                        (try
+                          (-serialize ((encryptor (:encryptor config)) (compressor serializer)) bos write-handlers value)
+                          (.toByteArray bos)
+                          (finally
+                            (.close bos))))))]
+    (async+sync
+     sync? *default-sync-translation*
+     (go-try-
+      (let [[key & rkey] key-vec
+            store-key (or store-key (key->store-key key))
 
-          meta  (up-fn-meta old-meta)
-          value (when (= operation :write-edn)
-                  (if-not (empty? rkey)
-                    (update-in old-value rkey up-fn)
-                    (up-fn old-value)))
-          new-store-key (if (:in-place? config)
-                          store-key
-                          (str store-key ".new"))
-          backup-store-key (str store-key ".backup")
-          _ (when (:in-place? config) ;; let's back things up before writing then
-              (trace "backing up to blob: " backup-store-key " for key " key)
-              (<?- (-copy backing store-key backup-store-key env)))
-          meta-arr             (to-array meta)
-          meta-size            (count meta-arr)
-          header               (create-header version
-                                              serializer compressor encryptor meta-size)
-          new-blob             (<?- (-create-blob backing new-store-key env))]
-      (try
-        (<?- (-write-header new-blob header env))
-        (<?- (-write-meta new-blob meta-arr env))
-        (if (= operation :write-binary)
-          (<?- (-write-binary new-blob meta-size input env))
-          (let [value-arr            (to-array value)]
-            (<?- (-write-value new-blob value-arr meta-size env))))
-
-        (when (:sync-blob? config)
-          (trace "syncing for " key)
-          (<?- (-sync new-blob env))
-          (<?- (-sync-store backing env)))
-        (<?- (-close new-blob env))
-
-        (when-not (:in-place? config)
-          (trace "moving blob: " key)
-          (<?- (-atomic-move backing new-store-key store-key env)))
-        (if (= operation :write-edn) [old-value value] true)
-        (finally
-          (<?- (-close new-blob env))))))))
+            meta  (up-fn-meta old-meta)
+            value (when (= operation :write-edn)
+                    (if-not (empty? rkey)
+                      (update-in old-value rkey up-fn)
+                      (up-fn old-value)))
+            new-store-key (if (:in-place? config)
+                            store-key
+                            (str store-key ".new"))
+            backup-store-key (str store-key ".backup")
+            _ (when (:in-place? config) ;; let's back things up before writing then
+                (trace "backing up to blob: " backup-store-key " for key " key)
+                (<?- (-copy backing store-key backup-store-key env)))
+            meta-arr             (to-array meta)
+            meta-size            (count meta-arr)
+            header               (create-header version
+                                                serializer compressor encryptor meta-size)
+            new-blob             (<?- (-create-blob backing new-store-key env))]
+        (try
+          (<?- (-write-header new-blob header env))
+          (<?- (-write-meta new-blob meta-arr env))
+          (if (= operation :write-binary)
+            (<?- (-write-binary new-blob meta-size input env))
+            (let [value-arr            (to-array value)]
+              (<?- (-write-value new-blob value-arr meta-size env))))
+          (when (:sync-blob? config)
+            (trace "syncing for " key)
+            (<?- (-sync new-blob env))
+            (<?- (-sync-store backing env)))
+          (<?- (-close new-blob env))
+          (when-not (:in-place? config)
+            (trace "moving blob: " key)
+            (<?- (-atomic-move backing new-store-key store-key env)))
+          (if (= operation :write-edn) [old-value value] true)
+          (finally
+            (<?- (-close new-blob env)))))))))
 
 (defn read-header [ac serializers env]
   (let [{:keys [sync?]} env]
