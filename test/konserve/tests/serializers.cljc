@@ -1,5 +1,5 @@
 (ns konserve.tests.serializers
-  (:require [clojure.core.async :as a :refer [<! go]]
+  (:require [clojure.core.async :as a :refer [<! go #?(:clj <!!)]]
             [clojure.test :refer [is testing]]
             [fress.api :as fress]
             [konserve.core :as k]
@@ -96,58 +96,71 @@
                   (fress/write-object writer (.-b o))))}})
 
 (defn test-fressian-serializers-async
-  [store-name connect-store delete-store-async]
+  "Test roundtripping custom types and records using the :FressianSerializer.
+   `locked-cb` is used to verify fressian bytes, needs to simply pass through
+   the input-stream on jvm or a full realized byte array in js"
+  [store-name connect-store delete-store-async locked-cb]
   (go
    (and
     (testing ":serializers arg to connect-store"
       (let [serializers {:FressianSerializer (fressian-serializer custom-read-handlers
                                                                   custom-write-handlers)}
-            _(assert (nil? (<! (delete-store-async "/tmp/serializers-test"))))
+            _(assert (nil? (<! (delete-store-async store-name))))
             store (<! (connect-store store-name :serializers serializers))
             d #?(:clj (Date.) :cljs (js/Date.))
             my-type (MyType. "a" "b")
-            my-record (map->MyRecord {:a 0 :b 1})]
-        (and
-         (is (nil? (<! (k/get-in store [:foo]))))
-         (is [nil 42] (<! (k/assoc-in store [:foo] 42)))
-         (is (= 42 (<! (k/get-in store [:foo]))))
-         (is (= [nil d] (<! (k/assoc-in store [:foo] d))))
-         ;; TODO verify tag
-         (is (= d (<! (k/get-in store [:foo]))))
-         (is (= [nil my-type] (<! (k/assoc-in store [:foo] my-type))))
-         (is (= my-type (<! (k/get-in store [:foo]))))
-         (is (= [nil my-record] (<! (k/assoc-in store [:foo] my-record))))
-         (is (= my-record (<! (k/get-in store [:foo])))))))
-    (testing "records are intercepted by incognito when write-handler isn't specified"
-      (let [_(assert (nil? (<! (delete-store-async "/tmp/serializers-test"))))
-            store (<! (connect-store store-name))
-            my-record (map->MyRecord {:a 0 :b 1})]
-        (and
-         (is (= [nil my-record] (<! (k/assoc-in store [:bar] my-record))))
-         (is (instance? IncognitoTaggedLiteral (<! (k/get-in store [:bar])))))))
+            my-record (map->MyRecord {:a 0 :b 1})
+            res (and
+                 (is [nil 42] (<! (k/assoc-in store [:foo] 42)))
+                 (is (= 42 (<! (k/get-in store [:foo]))))
+                 (is (= [nil d] (<! (k/assoc-in store [:foo] d))))
+                 (testing "should be written with custom-tag not built-in"
+                   (let [bytes (<! (k/bget store :foo locked-cb))
+                         o (fress/read bytes)]
+                     (and (is (fress/tagged-object? o))
+                          (is (= "custom-tag" (fress/tag o))))))
+                 (is (= d (<! (k/get-in store  [:foo]))))
+                 (is (= [nil my-type] (<! (k/assoc-in store [:foo] my-type))))
+                 (is (= my-type (<! (k/get-in store [:foo]))))
+                 (testing "custom write-handler takes precedent over incognito"
+                   (is (= [nil my-record] (<! (k/assoc-in store [:foo] my-record))))
+                   (let [bytes (<! (k/bget store :foo locked-cb))
+                         o (fress/read bytes)]
+                     (and (is (fress/tagged-object? o))
+                          (is (= "my-record" (fress/tag o)))))
+                   (is (= my-record (<! (k/get-in store [:foo]))))))]
+        #?(:cljs (when (.-close (:backing store)) (<! (.close (:backing store)))))
+        (assert (nil? (<! (delete-store-async store-name))))
+        res))
+    (testing "records are intercepted by incognito by default"
+      (let [store (<! (connect-store store-name))
+            my-record (map->MyRecord {:a 0 :b 1})
+            res (and
+                 (is (= [nil my-record] (<! (k/assoc-in store [:bar] my-record))))
+                 (is (instance? IncognitoTaggedLiteral (<! (k/get-in store [:bar])))))]
+        #?(:cljs (when (.-close (:backing store)) (<! (.close (:backing store)))))
+        (assert (nil? (<! (delete-store-async store-name))))
+        res))
     (testing ":read-handlers arg to connect-store let's us recover records"
-      (let [_(assert (nil? (<! (delete-store-async "/tmp/serializers-test"))))
-            read-handlers {'konserve.tests.serializers.MyRecord map->MyRecord}
-            store (<! (connect-store store-name
-                                     :read-handlers (atom read-handlers)))
-            my-record (map->MyRecord {:a 0 :b 1})]
-        (and
-         (is (nil? (<! (k/get-in store [:foo]))))
-         (is (= [nil my-record] (<! (k/assoc-in store [:foo] my-record))))
-         (is (= my-record (<! (k/get-in store [:foo]))))))))))
+        (let [read-handlers {'konserve.tests.serializers.MyRecord map->MyRecord}
+              store (<! (connect-store store-name
+                                       :read-handlers (atom read-handlers)))
+              my-record (map->MyRecord {:a 0 :b 1})]
+          (and
+           (is (nil? (<! (k/get-in store [:foo]))))
+           (is (= [nil my-record] (<! (k/assoc-in store [:foo] my-record))))
+           (is (= my-record (<! (k/get-in store [:foo])))))
+          #?(:cljs (when (.-close (:backing store)) (<! (.close (:backing store)))))
+          (assert (nil? (<! (delete-store-async store-name)))))))))
 
-#_
-(deftest cbor-serializer-test
-  (testing "Test CBOR serializer functionality."
-    (let [folder "/tmp/konserve-fs-cbor-test"
-          _      (delete-store folder)
-          store  (<!! (connect-fs-store folder :default-serializer :CBORSerializer))]
-      (is (= (<!! (k/get-in store [:foo]))
-             nil))
-      (<!! (k/assoc-in store [:foo] (Date.)))
-      (is (= (type (<!! (k/get-in store [:foo])))
-             java.time.Instant))
-      (<!! (k/dissoc store :foo))
-      (is (= (<!! (k/get-in store [:foo]))
-             nil))
-      (delete-store folder))))
+#?(:clj
+   (defn cbor-serializer-test [store-name connect-store delete-store-async]
+     (testing "Test CBOR serializer functionality."
+       (let [_      (<!! (delete-store-async store-name))
+             store  (<!! (connect-store store-name :default-serializer :CBORSerializer))]
+         (is (nil? (<!! (k/get-in store [:foo]))))
+         (<!! (k/assoc-in store [:foo] (Date.)))
+         (is (= java.time.Instant (type (<!! (k/get-in store [:foo])))))
+         (<!! (k/dissoc store :foo))
+         (is (nil? (<!! (k/get-in store [:foo]))))
+         (<!! (delete-store-async store-name))))))

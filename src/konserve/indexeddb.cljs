@@ -277,9 +277,9 @@
       (let [read-chunk (fn read-chunk []
                          (.then (.read reader)
                                 (fn [result]
-                                  (let [done (.-done result)
-                                        value (.-value result)]
-                                    (if done
+                                  (if (.-done result)
+                                    (do
+                                      (some->> (.-value result) (.push chunks))
                                       (if (== 1 (alength chunks))
                                         (put! out (.slice (aget chunks 0) offset))
                                         (let [total-length (reduce + (map count chunks))
@@ -288,10 +288,10 @@
                                           (doseq [chunk (array-seq chunks)]
                                             (.set final-array chunk @_i)
                                             (swap! _i + (alength chunk)))
-                                          (put! out (.slice final-array offset))))
-                                      (do
-                                        (.push chunks value)
-                                        (read-chunk)))))
+                                          (put! out (.slice final-array offset)))))
+                                    (do
+                                      (.push chunks (.-value result))
+                                      (read-chunk))))
                                 (fn [err] (put! out err))))]
         (read-chunk)))))
 
@@ -341,5 +341,4 @@
                                                   :lock-blob? true}}
                             (dissoc params :config))
         backing            (IndexedDBackingStore. db-name nil)]
-    (println store-config)
     (defaults/connect-default-store backing store-config)))

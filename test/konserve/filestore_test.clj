@@ -127,4 +127,11 @@
 (deftest fressian-serializer-test
   (<!! (st/test-fressian-serializers-async "/tmp/serializers-test"
                                            connect-fs-store
-                                           (fn [p] (go (delete-store p))))))
+                                           (fn [p] (go (delete-store p)))
+                                           (fn [{:keys [input-stream]}]
+                                             (async/to-chan! [input-stream])))))
+
+(deftest CBOR-serializer-test
+  (st/cbor-serializer-test "/tmp/konserve-fs-cbor-test"
+                           connect-fs-store
+                           (fn [p] (go (delete-store p)))))
